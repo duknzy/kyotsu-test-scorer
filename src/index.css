@@ -1,0 +1,120 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Guide: light-dismiss-a-dialog */
+dialog::backdrop {
+  background-color: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(3px);
+}
+
+/* Guide: responsive-table */
+.table-wrapper {
+  overflow: auto;
+  max-inline-size: 100%;
+  max-block-size: min(560px, 80vh);
+  container-type: inline-size;
+}
+
+.responsive-data-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100%;
+}
+
+/* Sticky column headers (desktop) */
+.responsive-data-table thead {
+  position: sticky;
+  inset-block-start: 0;
+  z-index: 2;
+}
+
+/* Sticky row headers (desktop) */
+.responsive-data-table tbody th {
+  position: sticky;
+  inset-inline-start: 0;
+  background: white;
+  z-index: 1;
+}
+
+@container (width < 600px) {
+  .responsive-data-table,
+  .responsive-data-table thead,
+  .responsive-data-table tbody,
+  .responsive-data-table tr,
+  .responsive-data-table th,
+  .responsive-data-table td {
+    display: block;
+  }
+
+  .responsive-data-table thead {
+    /* MANDATORY: Hide column header from layout and screen readers. */
+    display: none;
+  }
+
+  .responsive-data-table tr {
+    margin-block-end: 1rem;
+    border: 1px solid #cbd5e1;
+    border-radius: 0.75rem;
+    overflow: hidden;
+    background: white;
+  }
+
+  .responsive-data-table tbody th {
+    position: sticky;
+    inset-block-start: 0;
+    z-index: 2;
+    background: #f1f5f9;
+    padding: 0.75rem 1rem;
+    font-weight: 700;
+  }
+
+  .responsive-data-table {
+    --label-2: "傾斜満点";
+    --label-3: "換算得点";
+    --label-4: "得点率";
+    --label-5: "判定";
+    --label-6: "A判定まで";
+    --label-7: "二次必要点";
+  }
+
+  .responsive-data-table td {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.625rem 1rem;
+    border-top: 1px solid #f1f5f9;
+  }
+
+  .responsive-data-table td:nth-child(2)::before {
+    content: var(--label-2) ": ";
+    font-weight: 600;
+    color: #64748b;
+  }
+  .responsive-data-table td:nth-child(3)::before {
+    content: var(--label-3) ": ";
+    font-weight: 600;
+    color: #64748b;
+  }
+  .responsive-data-table td:nth-child(4)::before {
+    content: var(--label-4) ": ";
+    font-weight: 600;
+    color: #64748b;
+  }
+  .responsive-data-table td:nth-child(5)::before {
+    content: var(--label-5) ": ";
+    font-weight: 600;
+    color: #64748b;
+  }
+  .responsive-data-table td:nth-child(6)::before {
+    content: var(--label-6) ": ";
+    font-weight: 600;
+    color: #64748b;
+  }
+  .responsive-data-table td:nth-child(7)::before {
+    content: var(--label-7) ": ";
+    font-weight: 600;
+    color: #64748b;
+  }
+}
+
