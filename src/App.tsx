@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useId } from 'react';
+import React, { useState, useEffect, useId, useRef } from 'react';
+import { User } from 'firebase/auth';
 import { MockExamSession, SubjectScoreData, TargetUniversity } from './types';
 import {
   INITIAL_EXAM_SESSIONS,
@@ -14,6 +15,18 @@ import { SelfScoringPanel } from './components/SelfScoringPanel';
 import { UniversityPanel } from './components/UniversityPanel';
 import { SubjectRadarChart, ScoreTrendChart } from './components/Charts';
 import { LightDismissDialog } from './components/LightDismissDialog';
+import { AuthModal } from './components/AuthModal';
+import { FirebaseConfigModal } from './components/FirebaseConfigModal';
+import { subscribeAuth, logout } from './firebase/authService';
+import { isFirebaseConfigured } from './firebase/config';
+import {
+  saveExamSessionToFirestore,
+  deleteExamSessionFromFirestore,
+  saveUniversityToFirestore,
+  deleteUniversityFromFirestore,
+  fetchUserDataFromFirestore,
+  syncLocalDataToFirestore,
+} from './firebase/firestoreService';
 import {
   BookOpenCheck,
   GraduationCap,
@@ -26,12 +39,26 @@ import {
   AlertCircle,
   Download,
   Trash2,
+  Cloud,
+  CloudCheck,
+  CloudOff,
+  User as UserIcon,
+  LogIn,
+  LogOut,
+  Settings,
+  RefreshCw,
 } from 'lucide-react';
 
 const STORAGE_KEY_SESSIONS = 'kyotsu_nav_sessions_v2';
 const STORAGE_KEY_UNIVERSITIES = 'kyotsu_nav_universities_v2';
 
 export function App() {
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [syncStatus, setSyncStatus] = useState<'synced' | 'syncing' | 'offline' | 'local'>('local');
+
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [isConfigModalOpen, setIsConfigModalOpen] = useState(false);
+
   const [sessions, setSessions] = useState<MockExamSession[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY_SESSIONS);
@@ -40,7 +67,7 @@ export function App() {
         if (Array.isArray(parsed)) return parsed;
       }
     } catch {
-      // ignore storage errors
+      // ignore
     }
     return INITIAL_EXAM_SESSIONS;
   });
@@ -53,7 +80,7 @@ export function App() {
         if (Array.isArray(parsed)) return parsed;
       }
     } catch {
-      // ignore storage errors
+      // ignore
     }
     return INITIAL_UNIVERSITIES;
   });
@@ -62,21 +89,16 @@ export function App() {
     return sessions[sessions.length - 1]?.id || '';
   });
 
-  const [activeTab, setActiveTab] = useState<'scoring' | 'university' | 'analytics'>(
-    'scoring'
-  );
+  const [activeTab, setActiveTab] = useState<'scoring' | 'university' | 'analytics'>('scoring');
 
   // New exam session dialog
   const newSessionDialogTitleId = useId();
   const [isNewSessionModalOpen, setIsNewSessionModalOpen] = useState(false);
   const [newSessionTitle, setNewSessionTitle] = useState('');
-  const [newSessionProvider, setNewSessionProvider] =
-    useState<MockExamSession['provider']>('河合塾');
-  const [newSessionDate, setNewSessionDate] = useState(() => {
-    const today = new Date();
-    return today.toISOString().slice(0, 10);
-  });
+  const [newSessionProvider, setNewSessionProvider] = useState<MockExamSession['provider']>('河合塾');
+  const [newSessionDate, setNewSessionDate] = useState(() => new Date().toISOString().slice(0, 10));
 
+  // Local storage backup
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_KEY_SESSIONS, JSON.stringify(sessions));
@@ -92,6 +114,37 @@ export function App() {
       // ignore
     }
   }, [universities]);
+
+  // Auth observer and Firestore initial hydration
+  useEffect(() => {
+    const unsub = subscribeAuth(async (user) => {
+      setCurrentUser(user);
+      if (user) {
+        setSyncStatus('syncing');
+        try {
+          const cloudData = await fetchUserDataFromFirestore(user.uid);
+          if (cloudData.sessions.length > 0 || cloudData.universities.length > 0) {
+            setSessions(cloudData.sessions);
+            setUniversities(cloudData.universities);
+            if (cloudData.sessions.length > 0) {
+              setActiveSessionId(cloudData.sessions[cloudData.sessions.length - 1].id);
+            }
+          } else if (sessions.length > 0 || universities.length > 0) {
+            // Upload existing local data to cloud on first login
+            await syncLocalDataToFirestore(user.uid, sessions, universities);
+          }
+          setSyncStatus('synced');
+        } catch (e) {
+          console.error('Firestore hydration error:', e);
+          setSyncStatus('offline');
+        }
+      } else {
+        setSyncStatus(isFirebaseConfigured ? 'local' : 'offline');
+      }
+    });
+
+    return () => unsub();
+  }, []);
 
   const currentSession: MockExamSession | undefined =
     sessions.find((s) => s.id === activeSessionId) || sessions[sessions.length - 1];
@@ -115,23 +168,33 @@ export function App() {
       ? evaluateUniversity(currentSession, firstChoiceUni)
       : null;
 
-  const handleUpdateSubjectScore = (subjectId: string, updated: SubjectScoreData) => {
+  const handleUpdateSubjectScore = async (subjectId: string, updated: SubjectScoreData) => {
     if (!currentSession) return;
+    const updatedSession: MockExamSession = {
+      ...currentSession,
+      scores: {
+        ...currentSession.scores,
+        [subjectId]: updated,
+      },
+    };
+
     setSessions((prev) =>
-      prev.map((sess) => {
-        if (sess.id !== currentSession.id) return sess;
-        return {
-          ...sess,
-          scores: {
-            ...sess.scores,
-            [subjectId]: updated,
-          },
-        };
-      })
+      prev.map((sess) => (sess.id !== currentSession.id ? sess : updatedSession))
     );
+
+    if (currentUser) {
+      setSyncStatus('syncing');
+      try {
+        await saveExamSessionToFirestore(currentUser.uid, updatedSession);
+        setSyncStatus('synced');
+      } catch (e) {
+        console.error('Failed to sync session to cloud:', e);
+        setSyncStatus('offline');
+      }
+    }
   };
 
-  const handleCreateSession = (e: React.FormEvent) => {
+  const handleCreateSession = async (e: React.FormEvent) => {
     e.preventDefault();
     const baseScores: Record<string, SubjectScoreData> = {};
     SUBJECT_DEFINITIONS.forEach((subj) => {
@@ -154,20 +217,44 @@ export function App() {
       scores: baseScores,
     };
 
-    setSessions((prev) => [...prev, newSess]);
+    const nextSessions = [...sessions, newSess];
+    setSessions(nextSessions);
     setActiveSessionId(newSess.id);
     setNewSessionTitle('');
     setIsNewSessionModalOpen(false);
+
+    if (currentUser) {
+      setSyncStatus('syncing');
+      try {
+        await saveExamSessionToFirestore(currentUser.uid, newSess);
+        setSyncStatus('synced');
+      } catch (err) {
+        console.error('Failed to sync new session:', err);
+        setSyncStatus('offline');
+      }
+    }
   };
 
-  const handleDeleteCurrentSession = () => {
+  const handleDeleteCurrentSession = async () => {
     if (!currentSession) return;
-    const nextSessions = sessions.filter((s) => s.id !== currentSession.id);
+    const targetId = currentSession.id;
+    const nextSessions = sessions.filter((s) => s.id !== targetId);
     setSessions(nextSessions);
     setActiveSessionId(nextSessions[nextSessions.length - 1]?.id || '');
+
+    if (currentUser) {
+      setSyncStatus('syncing');
+      try {
+        await deleteExamSessionFromFirestore(currentUser.uid, targetId);
+        setSyncStatus('synced');
+      } catch (err) {
+        console.error('Failed to delete session from cloud:', err);
+        setSyncStatus('offline');
+      }
+    }
   };
 
-  const handleSaveUniversity = (uni: TargetUniversity) => {
+  const handleSaveUniversity = async (uni: TargetUniversity) => {
     setUniversities((prev) => {
       const exists = prev.some((u) => u.id === uni.id);
       if (exists) {
@@ -175,10 +262,32 @@ export function App() {
       }
       return [...prev, uni];
     });
+
+    if (currentUser) {
+      setSyncStatus('syncing');
+      try {
+        await saveUniversityToFirestore(currentUser.uid, uni);
+        setSyncStatus('synced');
+      } catch (err) {
+        console.error('Failed to save university to cloud:', err);
+        setSyncStatus('offline');
+      }
+    }
   };
 
-  const handleDeleteUniversity = (id: string) => {
+  const handleDeleteUniversity = async (id: string) => {
     setUniversities((prev) => prev.filter((u) => u.id !== id));
+
+    if (currentUser) {
+      setSyncStatus('syncing');
+      try {
+        await deleteUniversityFromFirestore(currentUser.uid, id);
+        setSyncStatus('synced');
+      } catch (err) {
+        console.error('Failed to delete university from cloud:', err);
+        setSyncStatus('offline');
+      }
+    }
   };
 
   const handleExportJson = () => {
@@ -254,8 +363,100 @@ export function App() {
             </div>
           </div>
 
-          {/* Exam Session Selector & Actions */}
+          {/* Center/Right Actions: Auth, Cloud Sync, Session Selector */}
           <div className="flex flex-wrap items-center gap-2">
+            {/* Cloud Sync Status Indicator */}
+            <div
+              className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+                syncStatus === 'synced'
+                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                  : syncStatus === 'syncing'
+                  ? 'bg-indigo-50 text-indigo-700 border border-indigo-200 animate-pulse'
+                  : syncStatus === 'offline'
+                  ? 'bg-rose-50 text-rose-700 border border-rose-200'
+                  : 'bg-slate-100 text-slate-600 border border-slate-200'
+              }`}
+              title={
+                currentUser
+                  ? 'クラウド（Firestore）に自動保存中'
+                  : '未ログイン（ローカル保存中）'
+              }
+            >
+              {syncStatus === 'synced' ? (
+                <>
+                  <Cloud className="h-3.5 w-3.5 text-emerald-600" />
+                  <span>クラウド同期済</span>
+                </>
+              ) : syncStatus === 'syncing' ? (
+                <>
+                  <RefreshCw className="h-3.5 w-3.5 animate-spin text-indigo-600" />
+                  <span>同期中...</span>
+                </>
+              ) : syncStatus === 'offline' ? (
+                <>
+                  <CloudOff className="h-3.5 w-3.5 text-rose-600" />
+                  <span>オフライン</span>
+                </>
+              ) : (
+                <>
+                  <CloudOff className="h-3.5 w-3.5 text-slate-400" />
+                  <span>ローカル保存</span>
+                </>
+              )}
+            </div>
+
+            {/* Auth Button */}
+            {currentUser ? (
+              <div className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-2.5 py-1 text-xs">
+                {currentUser.photoURL ? (
+                  <img
+                    src={currentUser.photoURL}
+                    alt="avatar"
+                    className="h-5 w-5 rounded-full"
+                  />
+                ) : (
+                  <div className="flex h-5 w-5 items-center justify-center rounded-full bg-indigo-100 text-[10px] font-bold text-indigo-700">
+                    {currentUser.displayName ? currentUser.displayName[0] : 'U'}
+                  </div>
+                )}
+                <span className="max-w-[100px] truncate font-bold text-slate-700">
+                  {currentUser.displayName || currentUser.email || 'ゲスト'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => logout()}
+                  title="ログアウト"
+                  className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-rose-600"
+                >
+                  <LogOut className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setIsAuthModalOpen(true)}
+                className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3 py-1.5 text-xs font-bold text-white shadow-2xs hover:bg-indigo-700"
+              >
+                <LogIn className="h-3.5 w-3.5" />
+                ログイン / 保存
+              </button>
+            )}
+
+            {/* Firebase Settings button */}
+            <button
+              type="button"
+              onClick={() => setIsConfigModalOpen(true)}
+              title="Firebase 接続設定"
+              className={`rounded-xl border p-2 text-xs font-bold transition-colors ${
+                isFirebaseConfigured
+                  ? 'border-slate-200 text-slate-600 hover:bg-slate-100'
+                  : 'border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100'
+              }`}
+            >
+              <Settings className="h-4 w-4" />
+            </button>
+
+            {/* Exam Session Selector */}
             {sessions.length > 0 && currentSession && (
               <div className="flex items-center gap-1.5 rounded-xl border border-slate-300 bg-slate-50 px-3 py-1.5">
                 <Calendar className="h-4 w-4 text-indigo-600" />
@@ -277,7 +478,7 @@ export function App() {
             <button
               type="button"
               onClick={() => setIsNewSessionModalOpen(true)}
-              className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3 py-2 text-xs font-bold text-white shadow-2xs transition-colors hover:bg-indigo-700"
+              className="inline-flex items-center gap-1.5 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-bold text-indigo-700 transition-colors hover:bg-indigo-100"
             >
               <PlusCircle className="h-4 w-4" />
               新規模試を追加
@@ -309,6 +510,30 @@ export function App() {
       </header>
 
       <main className="mx-auto max-w-7xl space-y-6 px-4 pt-6 sm:px-6">
+        {!currentUser && (
+          <div className="rounded-2xl border border-indigo-100 bg-gradient-to-r from-indigo-50/70 via-white to-sky-50/70 p-4 text-xs text-slate-700 shadow-2xs">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <Cloud className="h-4 w-4 text-indigo-600" />
+                <span className="font-bold text-indigo-950">
+                  アカウントを作成してクラウド保存を有効にしませんか？
+                </span>
+                <span className="hidden sm:inline text-slate-500">
+                  Googleアカウントやメールでログインすると、スマホ・タブレット・PC間でデータが自動同期されます。
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsAuthModalOpen(true)}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-indigo-700"
+              >
+                <LogIn className="h-3.5 w-3.5" />
+                ログイン / 登録
+              </button>
+            </div>
+          </div>
+        )}
+
         {!currentSession ? (
           <div className="flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-indigo-200 bg-white p-12 text-center shadow-2xs">
             <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600">
@@ -318,7 +543,7 @@ export function App() {
               最初の模試・過去問演習を作成して自己採点を始めましょう
             </h2>
             <p className="mt-2 max-w-md text-xs text-slate-500">
-              プリセットデータはすべてクリアされています。「新規模試を追加」から今回自己採点する模試名を入力すると、科目別・大問別の採点や志望校の傾斜配点計算が利用できます。
+              「新規模試を追加」から模試名を入力すると、科目別・大問別の自己採点や志望校の傾斜配点計算が利用できます。
             </p>
             <button
               type="button"
@@ -713,6 +938,19 @@ export function App() {
           </div>
         </form>
       </LightDismissDialog>
+
+      {/* Auth Modal */}
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+        onOpenConfig={() => setIsConfigModalOpen(true)}
+      />
+
+      {/* Firebase Config Modal */}
+      <FirebaseConfigModal
+        isOpen={isConfigModalOpen}
+        onClose={() => setIsConfigModalOpen(false)}
+      />
     </div>
   );
 }

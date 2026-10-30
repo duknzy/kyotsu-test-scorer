@@ -1,0 +1,165 @@
+rules_version = '2';
+
+// ===============================================================
+// Assumed Data Model
+// ===============================================================
+//
+// Collection: users/{userId}/sessions/{sessionId}
+// Document ID: sessionId (string, 1-64 chars)
+// Fields:
+//   - id: string (required, 1-64 chars) - Session ID matching docId
+//   - title: string (required, 1-100 chars) - Exam title
+//   - date: string (required, 10 chars YYYY-MM-DD format) - Exam date
+//   - provider: string (required, allowed providers) - Organizing provider
+//   - scores: map (required, subjectId -> scoreData)
+//   - updatedAt: timestamp (optional)
+//
+// Collection: users/{userId}/universities/{universityId}
+// Document ID: universityId (string, 1-64 chars)
+// Fields:
+//   - id: string (required, 1-64 chars) - University record ID matching docId
+//   - name: string (required, 1-100 chars) - University name
+//   - faculty: string (required, 1-100 chars) - Faculty/department name
+//   - examType: string (required, in ['前期', '後期', '共通テスト利用'])
+//   - priority: int (required, between 1 and 5)
+//   - borderScoreRatio: map (required, rankA, rankB, rankC, rankD floats 0-100)
+//   - secondaryExamMax: float/int (required, >= 0)
+//   - secondaryTargetScore: float/int (required, >= 0)
+//   - totalPassMinimum: float/int (required, >= 0)
+//   - weights: map (required, subjectId -> {enabled, convertedMax})
+//   - notes: string (optional, <= 500 chars)
+//   - updatedAt: timestamp (optional)
+//
+// Collection: users/{userId}
+// Document ID: userId (matches request.auth.uid)
+// Fields:
+//   - uid: string (required, matches userId)
+//   - email: string (optional, valid email, <= 100 chars)
+//   - displayName: string (optional, <= 100 chars)
+//   - createdAt: timestamp (optional)
+//   - updatedAt: timestamp (optional)
+//
+// ===============================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default Deny Root
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    function validString(field, minLen, maxLen) {
+      return request.resource.data[field] is string &&
+             request.resource.data[field].size() >= minLen &&
+             request.resource.data[field].size() <= maxLen;
+    }
+
+    function validOptionalString(field, maxLen) {
+      return !(field in request.resource.data) ||
+             (request.resource.data[field] is string &&
+              request.resource.data[field].size() <= maxLen);
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidUserDoc(userId) {
+      return hasOnlyAllowedFields(['uid', 'email', 'displayName', 'createdAt', 'updatedAt']) &&
+             request.resource.data.uid == userId &&
+             validOptionalString('displayName', 100) &&
+             validOptionalString('email', 100);
+    }
+
+    function isValidExamSession(sessionId) {
+      return hasRequiredFields(['id', 'title', 'date', 'provider', 'scores']) &&
+             request.resource.data.id is string &&
+             request.resource.data.id.size() >= 1 &&
+             request.resource.data.id.size() <= 64 &&
+             request.resource.data.id == sessionId &&
+             validString('title', 1, 100) &&
+             validString('date', 10, 10) &&
+             request.resource.data.provider in ['河合塾', '駿台・ベネッセ', '東進', 'Z会', '本番・過去問', 'その他'] &&
+             request.resource.data.scores is map;
+    }
+
+    function isValidUniversity(uniId) {
+      return hasRequiredFields([
+               'id', 'name', 'faculty', 'examType', 'priority',
+               'borderScoreRatio', 'secondaryExamMax', 'secondaryTargetScore',
+               'totalPassMinimum', 'weights'
+             ]) &&
+             request.resource.data.id is string &&
+             request.resource.data.id.size() >= 1 &&
+             request.resource.data.id.size() <= 64 &&
+             request.resource.data.id == uniId &&
+             validString('name', 1, 100) &&
+             validString('faculty', 1, 100) &&
+             request.resource.data.examType in ['前期', '後期', '共通テスト利用'] &&
+             request.resource.data.priority is int &&
+             request.resource.data.priority >= 1 &&
+             request.resource.data.priority <= 5 &&
+             request.resource.data.borderScoreRatio is map &&
+             request.resource.data.secondaryExamMax is number &&
+             request.resource.data.secondaryExamMax >= 0 &&
+             request.resource.data.secondaryTargetScore is number &&
+             request.resource.data.secondaryTargetScore >= 0 &&
+             request.resource.data.totalPassMinimum is number &&
+             request.resource.data.totalPassMinimum >= 0 &&
+             request.resource.data.weights is map &&
+             validOptionalString('notes', 500);
+    }
+
+    // ===============================================================
+    // Collection Rules
+    // ===============================================================
+
+    // User Profile Document
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidUserDoc(userId);
+      allow update: if isOwner(userId) && isValidUserDoc(userId) &&
+                       request.resource.data.uid == resource.data.uid;
+      allow delete: if isOwner(userId);
+
+      // User's Mock Exam Sessions Subcollection
+      match /sessions/{sessionId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidExamSession(sessionId);
+        allow update: if isOwner(userId) && isValidExamSession(sessionId) &&
+                         request.resource.data.id == resource.data.id;
+        allow delete: if isOwner(userId);
+      }
+
+      // User's Target Universities Subcollection
+      match /universities/{universityId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidUniversity(universityId);
+        allow update: if isOwner(userId) && isValidUniversity(universityId) &&
+                         request.resource.data.id == resource.data.id;
+        allow delete: if isOwner(userId);
+      }
+    }
+  }
+}
