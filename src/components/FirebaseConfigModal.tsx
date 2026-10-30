@@ -229,3 +229,4 @@ export const FirebaseConfigModal: React.FC<FirebaseConfigModalProps> = ({
     </LightDismissDialog>
   );
 };
+

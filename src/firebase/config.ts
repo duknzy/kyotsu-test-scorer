@@ -13,17 +13,27 @@ export interface FirebaseConfig {
 
 const STORAGE_KEY_FIREBASE_CONFIG = 'kyotsu_nav_firebase_custom_config_v1';
 
-// Default config from env if available
-const envConfig: FirebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || '',
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || '',
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || '',
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || '',
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '',
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || '',
+// Pre-configured official project credentials for kyotsu-scorer-duknzy
+const defaultProjectConfig: FirebaseConfig = {
+  apiKey: "AIzaSyDtaCLxMbUCoBrYB0jruqStu68yzZLVLlc",
+  authDomain: "kyotsu-scorer-duknzy.firebaseapp.com",
+  projectId: "kyotsu-scorer-duknzy",
+  storageBucket: "kyotsu-scorer-duknzy.firebasestorage.app",
+  messagingSenderId: "209552579670",
+  appId: "1:209552579670:web:b006b6c2f360f6efd1eff7",
 };
 
-export function getSavedFirebaseConfig(): FirebaseConfig | null {
+// Fallback to env config if provided
+const envConfig: FirebaseConfig = {
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || defaultProjectConfig.apiKey,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || defaultProjectConfig.authDomain,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || defaultProjectConfig.projectId,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || defaultProjectConfig.storageBucket,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || defaultProjectConfig.messagingSenderId,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || defaultProjectConfig.appId,
+};
+
+export function getSavedFirebaseConfig(): FirebaseConfig {
   try {
     const saved = localStorage.getItem(STORAGE_KEY_FIREBASE_CONFIG);
     if (saved) {
@@ -36,11 +46,7 @@ export function getSavedFirebaseConfig(): FirebaseConfig | null {
     console.error('Failed to read saved Firebase config:', e);
   }
 
-  if (envConfig.apiKey && envConfig.projectId) {
-    return envConfig;
-  }
-
-  return null;
+  return envConfig;
 }
 
 export function saveFirebaseConfig(config: FirebaseConfig) {

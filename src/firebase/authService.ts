@@ -65,3 +65,4 @@ export function subscribeAuth(callback: AuthStateChangeCallback): () => void {
   }
   return onAuthStateChanged(auth, callback);
 }
+
