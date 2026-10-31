@@ -80,13 +80,18 @@ export const SelfScoringPanel: React.FC<SelfScoringPanelProps> = ({
           ? effective.defaultTarget
           : Math.min(effective.maxScore, existing.targetScore);
 
-      nextScores[id] = {
+      const updatedSlot: SubjectScoreData = {
         ...existing,
         enabled,
-        selectedCourseId: nextCourseId,
         rawScore: Math.min(effective.maxScore, existing.rawScore),
         targetScore,
       };
+      if (nextCourseId !== undefined) {
+        updatedSlot.selectedCourseId = nextCourseId;
+      } else {
+        delete updatedSlot.selectedCourseId;
+      }
+      nextScores[id] = updatedSlot;
     };
 
     if (pattern === 'bunkei_national') {

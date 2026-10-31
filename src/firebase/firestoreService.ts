@@ -11,11 +11,29 @@ import {
 import { db } from './config';
 import { MockExamSession, TargetUniversity } from '../types';
 
+// Recursively remove any keys whose value is `undefined` so Firestore setDoc/batch.set never throws
+function stripUndefined<T>(obj: T): T {
+  if (obj === null || typeof obj !== 'object') {
+    return obj;
+  }
+  if (Array.isArray(obj)) {
+    return obj.map((item) => stripUndefined(item)) as unknown as T;
+  }
+  const cleaned: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
+    if (v !== undefined) {
+      cleaned[k] = stripUndefined(v);
+    }
+  }
+  return cleaned as T;
+}
+
 export async function saveExamSessionToFirestore(userId: string, session: MockExamSession): Promise<void> {
   if (!db || !userId) return;
   const sessionDocRef = doc(db, 'users', userId, 'sessions', session.id);
+  const cleanSession = stripUndefined(session);
   await setDoc(sessionDocRef, {
-    ...session,
+    ...cleanSession,
     updatedAt: serverTimestamp(),
   });
 }
@@ -29,8 +47,9 @@ export async function deleteExamSessionFromFirestore(userId: string, sessionId: 
 export async function saveUniversityToFirestore(userId: string, uni: TargetUniversity): Promise<void> {
   if (!db || !userId) return;
   const uniDocRef = doc(db, 'users', userId, 'universities', uni.id);
+  const cleanUni = stripUndefined(uni);
   await setDoc(uniDocRef, {
-    ...uni,
+    ...cleanUni,
     updatedAt: serverTimestamp(),
   });
 }
@@ -78,16 +97,18 @@ export async function syncLocalDataToFirestore(
 
   for (const sess of localSessions) {
     const sRef = doc(db, 'users', userId, 'sessions', sess.id);
+    const cleanSess = stripUndefined(sess);
     batch.set(sRef, {
-      ...sess,
+      ...cleanSess,
       updatedAt: serverTimestamp(),
     });
   }
 
   for (const uni of localUniversities) {
     const uRef = doc(db, 'users', userId, 'universities', uni.id);
+    const cleanUni = stripUndefined(uni);
     batch.set(uRef, {
-      ...uni,
+      ...cleanUni,
       updatedAt: serverTimestamp(),
     });
   }

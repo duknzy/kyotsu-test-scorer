@@ -258,9 +258,8 @@ export function App() {
         sections: {},
       });
 
-      baseScores[subj.id] = {
+      const slotData: SubjectScoreData = {
         subjectId: subj.id,
-        selectedCourseId,
         enabled,
         rawScore: 0,
         targetScore:
@@ -270,6 +269,10 @@ export function App() {
         useSectionMode: false,
         sections: {},
       };
+      if (selectedCourseId !== undefined) {
+        slotData.selectedCourseId = selectedCourseId;
+      }
+      baseScores[subj.id] = slotData;
     });
 
     const newSess: MockExamSession = {
@@ -995,22 +998,25 @@ export function App() {
               value={newSessionPattern}
               onChange={(e) =>
                 setNewSessionPattern(
-                  e.target.value as 'bunkei' | 'rikei' | 'private_bun' | 'private_ri'
+                  e.target.value as 'inherit' | 'bunkei' | 'rikei' | 'private_bunkei' | 'private_rikei'
                 )
               }
               className="mt-1 w-full rounded-xl border border-indigo-200 bg-indigo-50/50 px-3 py-2 text-sm font-bold text-indigo-950 focus:border-indigo-500 focus:outline-none"
             >
+              <option value="inherit">
+                🔄 直前の模試の受験科目・目標設定を引き継ぐ
+              </option>
               <option value="bunkei">
                 🌸 国公立文系型（理科基礎50点×2 ＋ 地歴公民2科目 ＋ 英数国情 / 1000点）
               </option>
               <option value="rikei">
                 🔬 国公立理系型（専門理科100点×2 ＋ 地歴公民1科目 ＋ 英数国情 / 1000点）
               </option>
-              <option value="private_bun">
+              <option value="private_bunkei">
                 🏛️ 私大文系3教科型（英語・国語・地歴公民1科目 / 500点）
               </option>
-              <option value="private_ri">
-                ⚙️ 私大理系3教科型（英語・数IA・数IIBC・専門理科1科目 / 500点）
+              <option value="private_rikei">
+                ⚙️ 私大理系3教科型（英語・数IA・数IIBC・専門理科2科目 / 600点）
               </option>
             </select>
             <p className="mt-1 text-[11px] text-slate-500">
