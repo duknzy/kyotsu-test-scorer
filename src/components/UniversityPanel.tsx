@@ -3,6 +3,7 @@ import { MockExamSession, TargetUniversity } from '../types';
 import {
   SUBJECT_DEFINITIONS,
   createDefaultWeights,
+  getEffectiveSubjectInfo,
 } from '../data/defaultSubjects';
 import { evaluateUniversity, UniversityEvaluationResult } from '../utils/calculations';
 import { LightDismissDialog } from './LightDismissDialog';
@@ -98,7 +99,7 @@ export const UniversityPanel: React.FC<UniversityPanelProps> = ({
       secondaryExamMax: 400,
       secondaryTargetScore: 240,
       totalPassMinimum: 1000,
-      weights: createDefaultWeights(),
+      weights: createDefaultWeights(session),
       notes: '',
     });
     setIsModalOpen(true);
@@ -775,10 +776,24 @@ export const UniversityPanel: React.FC<UniversityPanelProps> = ({
 
             {/* Subject Weights Grid */}
             <div>
-              <div className="mb-2 flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-700">
-                  各科目の傾斜配点（素点満点 → 大学独自の換算満点）
-                </span>
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-slate-700">
+                    各科目の傾斜配点（素点満点 → 大学独自の換算満点）
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setEditingUni({
+                        ...editingUni,
+                        weights: createDefaultWeights(session),
+                      })
+                    }
+                    className="rounded-md border border-slate-300 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-100"
+                  >
+                    現在の受験科目・基礎満点に合わせる
+                  </button>
+                </div>
                 <span className="text-xs font-bold text-indigo-600">
                   傾斜満点合計:{' '}
                   {Object.values(editingUni.weights)
@@ -791,6 +806,7 @@ export const UniversityPanel: React.FC<UniversityPanelProps> = ({
 
               <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
                 {SUBJECT_DEFINITIONS.map((subj) => {
+                  const eff = getEffectiveSubjectInfo(subj, session.scores[subj.id]);
                   const w = editingUni.weights[subj.id] || {
                     enabled: false,
                     convertedMax: 0,
@@ -818,7 +834,7 @@ export const UniversityPanel: React.FC<UniversityPanelProps> = ({
                                   enabled: !w.enabled,
                                   convertedMax:
                                     !w.enabled && w.convertedMax === 0
-                                      ? subj.maxScore
+                                      ? eff.maxScore
                                       : w.convertedMax,
                                 },
                               },
@@ -827,9 +843,11 @@ export const UniversityPanel: React.FC<UniversityPanelProps> = ({
                           className="h-4 w-4 rounded border-slate-300 text-indigo-600"
                         />
                         <span>
-                          {subj.shortName}{' '}
+                          {subj.courseOptions
+                            ? `${subj.name}(${eff.shortName})`
+                            : eff.shortName}{' '}
                           <span className="font-normal text-slate-400">
-                            (素点{subj.maxScore})
+                            (素点{eff.maxScore})
                           </span>
                         </span>
                       </label>

@@ -100,7 +100,7 @@ service cloud.firestore {
              request.resource.data.id == sessionId &&
              validString('title', 1, 100) &&
              validString('date', 10, 10) &&
-             request.resource.data.provider in ['河合塾', '駿台・ベネッセ', '東進', 'Z会', '本番・過去問', 'その他'] &&
+             request.resource.data.provider in ['河合塾', '駿台・ベネッセ', '進研・ベネッセ', '東進', 'Z会', '本番・過去問', 'その他'] &&
              request.resource.data.scores is map;
     }
 

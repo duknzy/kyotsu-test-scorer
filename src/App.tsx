@@ -6,6 +6,7 @@ import {
   INITIAL_UNIVERSITIES,
   SUBJECT_DEFINITIONS,
   createEmptyScores,
+  getEffectiveSubjectInfo,
 } from './data/defaultSubjects';
 import {
   calculateSessionRawSummary,
@@ -97,6 +98,7 @@ export function App() {
   const [newSessionTitle, setNewSessionTitle] = useState('');
   const [newSessionProvider, setNewSessionProvider] = useState<MockExamSession['provider']>('河合塾');
   const [newSessionDate, setNewSessionDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [newSessionPattern, setNewSessionPattern] = useState<'inherit' | 'bunkei' | 'rikei' | 'private_bunkei' | 'private_rikei'>('inherit');
 
   // Local storage backup
   useEffect(() => {
@@ -194,16 +196,77 @@ export function App() {
     }
   };
 
+  const handleBatchUpdateScores = async (nextScores: Record<string, SubjectScoreData>) => {
+    if (!currentSession) return;
+    const updatedSession: MockExamSession = {
+      ...currentSession,
+      scores: nextScores,
+    };
+
+    setSessions((prev) =>
+      prev.map((sess) => (sess.id !== currentSession.id ? sess : updatedSession))
+    );
+
+    if (currentUser) {
+      setSyncStatus('syncing');
+      try {
+        await saveExamSessionToFirestore(currentUser.uid, updatedSession);
+        setSyncStatus('synced');
+      } catch (e) {
+        console.error('Failed to sync batch session to cloud:', e);
+        setSyncStatus('offline');
+      }
+    }
+  };
+
   const handleCreateSession = async (e: React.FormEvent) => {
     e.preventDefault();
     const baseScores: Record<string, SubjectScoreData> = {};
+
     SUBJECT_DEFINITIONS.forEach((subj) => {
       const prevSubj = currentSession?.scores[subj.id];
+      let enabled = prevSubj ? prevSubj.enabled : subj.id !== 'soc_2';
+      let selectedCourseId = prevSubj?.selectedCourseId || subj.defaultCourseId;
+
+      if (newSessionPattern === 'bunkei') {
+        enabled = true;
+        if (subj.id === 'sci_1') selectedCourseId = 'chem_basic';
+        if (subj.id === 'sci_2') selectedCourseId = 'bio_basic';
+        if (subj.id === 'soc_1') selectedCourseId = 'jp_hist';
+        if (subj.id === 'soc_2') selectedCourseId = 'civ_pol';
+      } else if (newSessionPattern === 'rikei') {
+        enabled = subj.id !== 'soc_2';
+        if (subj.id === 'sci_1') selectedCourseId = 'phys';
+        if (subj.id === 'sci_2') selectedCourseId = 'chem';
+        if (subj.id === 'soc_1') selectedCourseId = 'geo';
+      } else if (newSessionPattern === 'private_bunkei') {
+        enabled = ['eng_r', 'eng_l', 'kokugo', 'soc_1'].includes(subj.id);
+        if (subj.id === 'soc_1') selectedCourseId = 'jp_hist';
+      } else if (newSessionPattern === 'private_rikei') {
+        enabled = ['eng_r', 'eng_l', 'math_1a', 'math_2bc', 'sci_1', 'sci_2'].includes(subj.id);
+        if (subj.id === 'sci_1') selectedCourseId = 'phys';
+        if (subj.id === 'sci_2') selectedCourseId = 'chem';
+      }
+
+      const eff = getEffectiveSubjectInfo(subj, {
+        subjectId: subj.id,
+        selectedCourseId,
+        enabled,
+        rawScore: 0,
+        targetScore: subj.defaultTarget,
+        useSectionMode: false,
+        sections: {},
+      });
+
       baseScores[subj.id] = {
         subjectId: subj.id,
-        enabled: prevSubj ? prevSubj.enabled : subj.id !== 'soc_2',
+        selectedCourseId,
+        enabled,
         rawScore: 0,
-        targetScore: prevSubj ? prevSubj.targetScore : subj.defaultTarget,
+        targetScore:
+          newSessionPattern === 'inherit' && prevSubj
+            ? Math.min(eff.maxScore, prevSubj.targetScore)
+            : eff.defaultTarget,
         useSectionMode: false,
         sections: {},
       };
@@ -317,13 +380,14 @@ export function App() {
     SUBJECT_DEFINITIONS.forEach((subj) => {
       const sData = currentSession.scores[subj.id];
       if (!sData?.enabled) return;
-      subj.sections.forEach((sec) => {
+      const eff = getEffectiveSubjectInfo(subj, sData);
+      eff.sections.forEach((sec) => {
         const entry = sData.sections[sec.id];
         if (!entry) return;
         const pct = sec.maxScore > 0 ? Math.round((entry.score / sec.maxScore) * 100) : 0;
         if (pct < 80 || (entry.mistakeReasons && entry.mistakeReasons.length > 0) || entry.memo) {
           weakSectionsList.push({
-            subjectName: subj.shortName,
+            subjectName: eff.shortName,
             sectionName: sec.name,
             topic: sec.topic,
             score: entry.score,
@@ -742,6 +806,7 @@ export function App() {
               <SelfScoringPanel
                 session={currentSession}
                 onUpdateSubjectScore={handleUpdateSubjectScore}
+                onBatchUpdateScores={handleBatchUpdateScores}
               />
             )}
 
@@ -869,7 +934,7 @@ export function App() {
         onClose={() => setIsNewSessionModalOpen(false)}
         titleId={newSessionDialogTitleId}
         title="新しい共通テスト模試・過去問演習を追加"
-        subtitle="模試名と実施日を入力して自己採点を開始します。"
+        subtitle="模試名と受験型（文系・理系など）を選択して自己採点を開始します。"
       >
         <form onSubmit={handleCreateSession} className="space-y-4">
           <div>
@@ -879,7 +944,7 @@ export function App() {
             <input
               type="text"
               required
-              placeholder="例: 第3回 全統共通テスト模試"
+              placeholder="例: 進研マーク / 第3回 全統共通テスト模試"
               value={newSessionTitle}
               onChange={(e) => setNewSessionTitle(e.target.value)}
               className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm font-semibold focus:border-indigo-500 focus:outline-none"
@@ -900,6 +965,7 @@ export function App() {
               >
                 <option value="河合塾">河合塾（全統共テ模試）</option>
                 <option value="駿台・ベネッセ">駿台・ベネッセ（共テ模試）</option>
+                <option value="進研・ベネッセ">進研・ベネッセ（マーク模試）</option>
                 <option value="東進">東進（共通テスト本番レベル）</option>
                 <option value="Z会">Z会（共テ実戦模試）</option>
                 <option value="本番・過去問">本番・過去問演習</option>
@@ -919,6 +985,37 @@ export function App() {
                 className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm font-semibold"
               />
             </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-700">
+              初期の受験科目パターン（作成後も各科目カードで自由に変更可能）
+            </label>
+            <select
+              value={newSessionPattern}
+              onChange={(e) =>
+                setNewSessionPattern(
+                  e.target.value as 'bunkei' | 'rikei' | 'private_bun' | 'private_ri'
+                )
+              }
+              className="mt-1 w-full rounded-xl border border-indigo-200 bg-indigo-50/50 px-3 py-2 text-sm font-bold text-indigo-950 focus:border-indigo-500 focus:outline-none"
+            >
+              <option value="bunkei">
+                🌸 国公立文系型（理科基礎50点×2 ＋ 地歴公民2科目 ＋ 英数国情 / 1000点）
+              </option>
+              <option value="rikei">
+                🔬 国公立理系型（専門理科100点×2 ＋ 地歴公民1科目 ＋ 英数国情 / 1000点）
+              </option>
+              <option value="private_bun">
+                🏛️ 私大文系3教科型（英語・国語・地歴公民1科目 / 500点）
+              </option>
+              <option value="private_ri">
+                ⚙️ 私大理系3教科型（英語・数IA・数IIBC・専門理科1科目 / 500点）
+              </option>
+            </select>
+            <p className="mt-1 text-[11px] text-slate-500">
+              ※化学基礎・生物基礎・物理基礎・地学基礎などの50点科目や、日本史・世界史・地理・公共政経なども後からカード上で1科目ずつ選択できます。
+            </p>
           </div>
 
           <div className="flex justify-end gap-2 border-t border-slate-200 pt-4">

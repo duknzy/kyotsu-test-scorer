@@ -1,5 +1,5 @@
 import { MockExamSession, TargetUniversity } from '../types';
-import { SUBJECT_DEFINITIONS } from '../data/defaultSubjects';
+import { SUBJECT_DEFINITIONS, getEffectiveSubjectInfo } from '../data/defaultSubjects';
 
 export interface SessionRawSummary {
   totalRawScore: number;
@@ -17,9 +17,10 @@ export function calculateSessionRawSummary(session: MockExamSession): SessionRaw
   for (const subj of SUBJECT_DEFINITIONS) {
     const scoreData = session.scores[subj.id];
     if (scoreData && scoreData.enabled) {
-      totalRawScore += scoreData.rawScore;
-      totalRawMax += subj.maxScore;
-      totalTargetScore += scoreData.targetScore;
+      const effective = getEffectiveSubjectInfo(subj, scoreData);
+      totalRawScore += Math.min(effective.maxScore, scoreData.rawScore);
+      totalRawMax += effective.maxScore;
+      totalTargetScore += Math.min(effective.maxScore, scoreData.targetScore);
     }
   }
 
@@ -78,30 +79,35 @@ export function evaluateUniversity(
     if (!weight || !weight.enabled || weight.convertedMax <= 0) continue;
 
     const scoreData = session.scores[subj.id];
+    const effective = getEffectiveSubjectInfo(subj, scoreData);
+
     const rawScore =
       customRawOverrides && customRawOverrides[subj.id] !== undefined
         ? customRawOverrides[subj.id]
         : scoreData?.enabled
-        ? scoreData.rawScore
+        ? Math.min(effective.maxScore, scoreData.rawScore)
         : 0;
 
-    const targetRaw = scoreData?.targetScore ?? subj.defaultTarget;
-    const ratio = subj.maxScore > 0 ? rawScore / subj.maxScore : 0;
-    const targetRatio = subj.maxScore > 0 ? targetRaw / subj.maxScore : 0;
+    const targetRaw = scoreData
+      ? Math.min(effective.maxScore, scoreData.targetScore)
+      : effective.defaultTarget;
+    const ratio = effective.maxScore > 0 ? rawScore / effective.maxScore : 0;
+    const targetRatio = effective.maxScore > 0 ? targetRaw / effective.maxScore : 0;
 
     const subjConverted = ratio * weight.convertedMax;
     const subjTargetConverted = targetRatio * weight.convertedMax;
-    const weightMultiplier = subj.maxScore > 0 ? weight.convertedMax / subj.maxScore : 0;
+    const weightMultiplier =
+      effective.maxScore > 0 ? weight.convertedMax / effective.maxScore : 0;
 
     convertedScore += subjConverted;
     convertedMax += weight.convertedMax;
 
     subjectBreakdown.push({
       subjectId: subj.id,
-      subjectName: subj.name,
-      shortName: subj.shortName,
+      subjectName: effective.name,
+      shortName: effective.shortName,
       rawScore,
-      rawMax: subj.maxScore,
+      rawMax: effective.maxScore,
       convertedScore: subjConverted,
       convertedMax: weight.convertedMax,
       targetConvertedScore: subjTargetConverted,
@@ -174,4 +180,3 @@ export function evaluateUniversity(
     bestLeverageSubjects,
   };
 }
-

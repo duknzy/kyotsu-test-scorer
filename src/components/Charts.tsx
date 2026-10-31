@@ -1,6 +1,6 @@
 import React from 'react';
 import { MockExamSession, SubjectDefinition } from '../types';
-import { SUBJECT_DEFINITIONS } from '../data/defaultSubjects';
+import { SUBJECT_DEFINITIONS, getEffectiveSubjectInfo } from '../data/defaultSubjects';
 
 interface RadarChartProps {
   session: MockExamSession;
@@ -39,8 +39,10 @@ export const SubjectRadarChart: React.FC<RadarChartProps> = ({ session }) => {
   // Current score polygon
   const actualPoints = activeSubjects
     .map((subj, idx) => {
-      const score = session.scores[subj.id]?.rawScore ?? 0;
-      const coord = getCoordinates(idx, score / subj.maxScore);
+      const sData = session.scores[subj.id];
+      const eff = getEffectiveSubjectInfo(subj, sData);
+      const score = Math.min(eff.maxScore, sData?.rawScore ?? 0);
+      const coord = getCoordinates(idx, score / eff.maxScore);
       return `${coord.x},${coord.y}`;
     })
     .join(' ');
@@ -48,8 +50,10 @@ export const SubjectRadarChart: React.FC<RadarChartProps> = ({ session }) => {
   // Target score polygon
   const targetPoints = activeSubjects
     .map((subj, idx) => {
-      const target = session.scores[subj.id]?.targetScore ?? subj.defaultTarget;
-      const coord = getCoordinates(idx, target / subj.maxScore);
+      const sData = session.scores[subj.id];
+      const eff = getEffectiveSubjectInfo(subj, sData);
+      const target = Math.min(eff.maxScore, sData?.targetScore ?? eff.defaultTarget);
+      const coord = getCoordinates(idx, target / eff.maxScore);
       return `${coord.x},${coord.y}`;
     })
     .join(' ');
@@ -82,7 +86,9 @@ export const SubjectRadarChart: React.FC<RadarChartProps> = ({ session }) => {
           const end = getCoordinates(idx, 1);
           const labelPos = getCoordinates(idx, 1.24);
           const scoreData = session.scores[subj.id];
-          const pct = Math.round(((scoreData?.rawScore ?? 0) / subj.maxScore) * 100);
+          const eff = getEffectiveSubjectInfo(subj, scoreData);
+          const score = Math.min(eff.maxScore, scoreData?.rawScore ?? 0);
+          const pct = Math.round((score / eff.maxScore) * 100);
           return (
             <g key={subj.id}>
               <line
@@ -100,7 +106,7 @@ export const SubjectRadarChart: React.FC<RadarChartProps> = ({ session }) => {
                 dominantBaseline="middle"
                 className="fill-slate-700 text-[11px] font-semibold"
               >
-                {subj.shortName}
+                {eff.shortName}
               </text>
               <text
                 x={labelPos.x}
@@ -134,8 +140,10 @@ export const SubjectRadarChart: React.FC<RadarChartProps> = ({ session }) => {
 
         {/* Vertices */}
         {activeSubjects.map((subj, idx) => {
-          const score = session.scores[subj.id]?.rawScore ?? 0;
-          const coord = getCoordinates(idx, score / subj.maxScore);
+          const sData = session.scores[subj.id];
+          const eff = getEffectiveSubjectInfo(subj, sData);
+          const score = Math.min(eff.maxScore, sData?.rawScore ?? 0);
+          const coord = getCoordinates(idx, score / eff.maxScore);
           return (
             <circle
               key={subj.id}
@@ -182,9 +190,10 @@ export const ScoreTrendChart: React.FC<TrendLineChartProps> = ({
     SUBJECT_DEFINITIONS.forEach((subj) => {
       const s = sess.scores[subj.id];
       if (s?.enabled) {
-        raw += s.rawScore;
-        max += subj.maxScore;
-        target += s.targetScore;
+        const eff = getEffectiveSubjectInfo(subj, s);
+        raw += Math.min(eff.maxScore, s.rawScore);
+        max += eff.maxScore;
+        target += Math.min(eff.maxScore, s.targetScore);
       }
     });
     const pct = max > 0 ? (raw / max) * 100 : 0;
@@ -331,4 +340,3 @@ export const ScoreTrendChart: React.FC<TrendLineChartProps> = ({
     </div>
   );
 };
-
